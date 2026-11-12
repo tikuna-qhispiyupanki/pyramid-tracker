@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ScatterChart, Scatter, ReferenceLine } from 'recharts';
-import { Activity, TrendingUp, Calendar, Dumbbell, Plus, Trash2, Download, Upload, BarChart3, Flame, Target, Database, Trophy, Zap, Award, Timer, Play, Pause, RotateCcw, Save, X, Info, Mail, Check, AlertTriangle } from 'lucide-react';
+import { Activity, TrendingUp, Calendar, Dumbbell, Plus, Trash2, Download, Upload, BarChart3, Flame, Target, Database, Trophy, Zap, Award, Timer, Play, Pause, RotateCcw, Save, X, Info, Mail, Check, AlertTriangle, Minus, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // localStorage-based storage shim (replaces Claude's window.storage in standalone mode)
 if (typeof window !== 'undefined' && !window.storage) {
@@ -493,7 +493,7 @@ const computeEras = (sessions) => {
 };
 
 export default function WorkoutTracker() {
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState('street');
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -502,6 +502,9 @@ export default function WorkoutTracker() {
   const [showStopwatch, setShowStopwatch] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showExportReminder, setShowExportReminder] = useState(false);
+  const [street, setStreet] = useState(null); // { type } for a new street session, { editId } to edit one
+  const [activeProgram, setActiveProgram] = useState(loadActiveProgram);
+  const changeProgram = (id) => { setActiveProgram(id); saveActiveProgram(id); };
 
   // Fix horizontal overflow on iPhone Safari globally
   useEffect(() => {
@@ -700,16 +703,19 @@ export default function WorkoutTracker() {
     setShowSeedPrompt(true);
   };
 
+  // Pyramid views only ever see pyramid sessions (A/B/C); street sessions (SA/SB/SC) live in the Street tab
+  const pyramidSessions = useMemo(() => sessions.filter(s => SET_TYPES.includes(s.type)), [sessions]);
+
   // Compute PRs once for all views
   const { prsBySession, bestTotalByWeight, bestLevelByWeightLevel } = useMemo(
-    () => computePRs(sessions),
-    [sessions]
+    () => computePRs(pyramidSessions),
+    [pyramidSessions]
   );
 
-  const levelRecords = useMemo(() => computeLevelRecords(sessions), [sessions]);
-  const levelBaselines = useMemo(() => computeLevelBaselines(sessions), [sessions]);
-  const fitnessScores = useMemo(() => computeFitnessScores(sessions), [sessions]);
-  const eras = useMemo(() => computeEras(sessions), [sessions]);
+  const levelRecords = useMemo(() => computeLevelRecords(pyramidSessions), [pyramidSessions]);
+  const levelBaselines = useMemo(() => computeLevelBaselines(pyramidSessions), [pyramidSessions]);
+  const fitnessScores = useMemo(() => computeFitnessScores(pyramidSessions), [pyramidSessions]);
+  const eras = useMemo(() => computeEras(pyramidSessions), [pyramidSessions]);
 
   // Get last session for "compare to previous" hint in form
   const getLastSimilarSession = (type, weight) => {
@@ -733,7 +739,7 @@ export default function WorkoutTracker() {
           <div style={styles.logo}><PyramidLogo size={24} color="#0a0a0a" accentColor="#ffc94d" /></div>
           <div>
             <h1 style={styles.title}>PYRAMID</h1>
-            <p style={styles.subtitle}>training analytics v2</p>
+            <p style={styles.subtitle}>street + pyramide</p>
           </div>
         </div>
         <div style={styles.headerRight} data-scroll-row>
@@ -746,6 +752,9 @@ export default function WorkoutTracker() {
           <button style={styles.iconBtn} onClick={() => setShowAbout(true)} title="À propos">
             <Info size={14} />
           </button>
+          <button style={{ ...styles.stopwatchBtn, background: STREET_COLOR }} onClick={() => setStreet({ type: suggestStreetType(sessions, activeProgram) })} title="Séance street">
+            <Zap size={16} /> Street
+          </button>
           <button style={styles.stopwatchBtn} onClick={() => setShowStopwatch(true)} title="Démarrer chrono">
             <Timer size={16} /> Chrono
           </button>
@@ -757,6 +766,7 @@ export default function WorkoutTracker() {
 
       <nav style={styles.nav} data-scroll-row>
         {[
+          { id: 'street', label: 'Street', icon: Zap },
           { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
           { id: 'records', label: 'Records', icon: Trophy },
           { id: 'calendar', label: 'Calendrier', icon: Calendar },
@@ -778,20 +788,30 @@ export default function WorkoutTracker() {
       </nav>
 
       <main style={styles.main}>
-        {tab === 'dashboard' && <Dashboard sessions={sessions} prsBySession={prsBySession} fitnessScores={fitnessScores} />}
-        {tab === 'records' && <Records sessions={sessions} levelRecords={levelRecords} bestTotalByWeight={bestTotalByWeight} />}
+        {tab === 'street' && (
+          <StreetTab
+            sessions={sessions}
+            activeProgram={activeProgram}
+            onChangeProgram={changeProgram}
+            onStart={(type) => setStreet({ type })}
+            onEdit={(id) => setStreet({ editId: id })}
+            onDelete={deleteSession}
+          />
+        )}
+        {tab === 'dashboard' && <Dashboard sessions={pyramidSessions} prsBySession={prsBySession} fitnessScores={fitnessScores} />}
+        {tab === 'records' && <Records sessions={pyramidSessions} levelRecords={levelRecords} bestTotalByWeight={bestTotalByWeight} />}
         {tab === 'calendar' && <CalendarView sessions={sessions} prsBySession={prsBySession} />}
         {tab === 'history' && (
           <History
-            sessions={sessions}
+            sessions={pyramidSessions}
             prsBySession={prsBySession}
             fitnessScores={fitnessScores}
             onEdit={(id) => { setEditingId(id); setShowForm(true); }}
             onDelete={deleteSession}
           />
         )}
-        {tab === 'analysis' && <Analysis sessions={sessions} eras={eras} fitnessScores={fitnessScores} />}
-        {tab === 'program' && <Program />}
+        {tab === 'analysis' && <Analysis sessions={pyramidSessions} eras={eras} fitnessScores={fitnessScores} />}
+        {tab === 'program' && <Program activeProgram={activeProgram} onChangeProgram={changeProgram} />}
       </main>
 
       {showSeedPrompt && (
@@ -832,6 +852,22 @@ export default function WorkoutTracker() {
           setCountsSoFar={{ A: sessions.filter(s => s.type === 'A').length, B: sessions.filter(s => s.type === 'B').length, C: sessions.filter(s => s.type === 'C').length }}
           levelRecords={levelRecords}
           levelBaselines={levelBaselines}
+        />
+      )}
+
+      {street && (
+        <StreetSession
+          sessions={sessions}
+          editing={street.editId ? sessions.find(s => s.id === street.editId) || null : null}
+          initialType={street.type || suggestStreetType(sessions, activeProgram)}
+          programId={activeProgram}
+          onClose={() => setStreet(null)}
+          onSave={(data) => {
+            if (street.editId) updateSession(street.editId, data);
+            else addSession(data);
+            setStreet(null);
+            setTab('street');
+          }}
         />
       )}
 
@@ -1059,7 +1095,7 @@ function Dashboard({ sessions, prsBySession, fitnessScores }) {
         <KPICard
           label="Séances"
           value={sessions.length}
-          sub={`${setASessions.length} A · ${setBSessions.length} B`}
+          sub={SET_TYPES.map(t => `${sessions.filter(x => x.type === t).length} ${t}`).join(' · ')}
           icon={Activity}
         />
         <KPICard
@@ -1479,7 +1515,7 @@ function CalendarView({ sessions, prsBySession }) {
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <h3 style={styles.cardTitle}>Calendrier d'activité</h3>
-          <span style={styles.cardSubtitle}>orange = A · bleu = B · vert = C · violet = multi · ◣ jaune = PR</span>
+          <span style={styles.cardSubtitle}>rose = street · orange = A · bleu = B · vert = C · violet = multi · ◣ jaune = PR</span>
         </div>
         <div style={styles.calendarGrid}>
           {allMonths.map(({ key, year, month, sessions: monthSessions }) => {
@@ -1507,11 +1543,14 @@ function CalendarView({ sessions, prsBySession }) {
                     const day = i + 1;
                     const daySessions = sessionsByDay[day] || [];
                     const dayTypes = SET_TYPES.filter(t => daySessions.some(s => s.type === t));
+                    if (daySessions.some(isStreet)) dayTypes.push('street');
                     const hasPR = daySessions.some(s => prsBySession[s.id]?.length > 0);
                     let bg = '#1a1a1a';
                     if (dayTypes.length > 1) bg = '#9b6dff';
-                    else if (dayTypes.length === 1) bg = getSetColor(dayTypes[0]);
-                    const titleParts = daySessions.map(s => `${s.type}${s.code ? ' ' + s.code : ''}: ${formatTime(getTotal(s))}${prsBySession[s.id]?.length ? ' 🏆' : ''}`);
+                    else if (dayTypes.length === 1) bg = dayTypes[0] === 'street' ? STREET_COLOR : getSetColor(dayTypes[0]);
+                    const titleParts = daySessions.map(s => isStreet(s)
+                      ? `Street ${STREET_PROGRAM[s.type].name}`
+                      : `${s.type}${s.code ? ' ' + s.code : ''}: ${formatTime(getTotal(s))}${prsBySession[s.id]?.length ? ' 🏆' : ''}`);
                     return (
                       <div
                         key={day}
@@ -1937,8 +1976,9 @@ function Analysis({ sessions, eras, fitnessScores }) {
 }
 
 // =============== PROGRAM ===============
-function Program() {
+function Program({ activeProgram = DEFAULT_PROGRAM_ID, onChangeProgram }) {
   const [activeSet, setActiveSet] = useState('A');
+  const [mode, setMode] = useState('street'); // street | pyramid
 
   const setA = {
     name: 'Set A',
@@ -2028,8 +2068,32 @@ function Program() {
   const current = setsMap[activeSet];
   const isX = activeSet === 'X';
 
+  const modeToggle = (
+    <div style={styles.programToggle}>
+      {[{ id: 'street', label: 'Street', color: STREET_COLOR }, { id: 'pyramid', label: 'Pyramide', color: '#ff6b35' }].map(m => (
+        <button
+          key={m.id}
+          style={{ ...styles.programToggleBtn, ...(mode === m.id ? { ...styles.programToggleBtnActive, background: m.color } : {}) }}
+          onClick={() => setMode(m.id)}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (mode === 'street') {
+    return (
+      <div style={styles.dashboard}>
+        {modeToggle}
+        <StreetProgram programId={activeProgram} onChangeProgram={onChangeProgram} />
+      </div>
+    );
+  }
+
   return (
     <div style={styles.dashboard}>
+      {modeToggle}
       {/* Set toggle */}
       <div style={styles.setToggle} data-scroll-row>
         {['A', 'B', 'C', 'X'].map(t => (
@@ -3515,6 +3579,1251 @@ function SessionForm({ session, onSave, onCancel, getLastSimilar }) {
 }
 
 // =============== STYLES ===============
+// =============== STREET WORKOUT MODE (programme séries × reps — nov. 2026) ===============
+// Séances Odyssée (OHA/OBA/OCA/OHB/OBB) et A/B/C (SA/SB/SC) stockées dans le même tableau `sessions` (mode: 'sets').
+// Les analyses pyramide ne lisent que SET_TYPES (A/B/C) : les programmes ne se mélangent jamais.
+const STREET_COLOR = '#ff5c8a';
+const STREET_MAX_SETS = 4;
+const STREET_IN_PROGRESS_KEY = 'pyramid:street-in-progress';
+const ACTIVE_PROGRAM_KEY = 'pyramid:activeProgram';
+const DEFAULT_PROGRAM_ID = 'odyssee';
+
+// Programme Odyssée — 5 séances lun → ven (sèche en gardant le muscle)
+const ODYSSEE_SESSIONS = {
+  OHA: {
+    letter: 'HA', name: 'Haut A', subtitle: 'Force', day: 'Lundi',
+    exercises: [
+      { id: 'od-trac-lest', name: 'Tractions lestées', sets: 4, min: 5, max: 6, unit: 'reps', rest: 150, loaded: true, equipment: 'Barre + sac lesté', cue: 'Pronation, bras tendus en bas, coudes vers les hanches. Descente 3 s, pas de balancement.' },
+      { id: 'od-dips-lest', name: 'Dips lestés', sets: 4, min: 5, max: 6, unit: 'reps', rest: 150, loaded: true, equipment: 'Barres parallèles + sac', cue: 'Épaule au niveau du coude en bas, pas plus bas si ça tire.' },
+      { id: 'od-row', name: 'Rowing australien', sets: 3, min: 8, max: 12, unit: 'reps', rest: 90, equipment: 'Barre basse', cue: 'Corps gainé, poitrine à la barre, 1 s en haut.' },
+      { id: 'od-pike', name: 'Pompes pike', sets: 3, min: 8, max: 12, unit: 'reps', rest: 90, equipment: 'Sol', cue: 'V inversé, tête vers le sol devant les mains.' },
+      { id: 'od-chin-lent', name: 'Chin-ups lents', sets: 3, min: 8, max: 12, unit: 'reps', rest: 90, equipment: 'Barre', cue: 'Supination. Montée 2 s, descente 4 s. Sinon négatives seules.' },
+      { id: 'od-ytw', name: 'Y-T-W au sol', sets: 2, min: 12, max: 15, unit: 'reps', rest: 60, equipment: 'Sol', cue: 'Prévention des épaules : ne le saute pas.' }
+    ],
+    finishers: []
+  },
+  OBA: {
+    letter: 'BA', name: 'Bas A', subtitle: 'Unilatéral', day: 'Mardi',
+    exercises: [
+      { id: 'od-bulgare', name: 'Fentes bulgares', sets: 4, min: 8, max: 12, unit: 'reps', perSide: 'jambe', rest: 90, equipment: 'Banc', cue: 'Genou arrière qui frôle le sol, pousse dans le talon avant.' },
+      { id: 'od-pistol', name: 'Pistol squat assisté', sets: 3, min: 6, max: 8, unit: 'reps', perSide: 'jambe', rest: 90, equipment: 'Poteau ou barre', cue: 'Talon au sol, aide-toi le moins possible du bras.' },
+      { id: 'od-pont', name: 'Pont fessier une jambe', sets: 3, min: 12, max: 15, unit: 'reps', perSide: 'jambe', rest: 60, equipment: 'Sol', cue: 'Serre les fessiers 2 s en haut.' },
+      { id: 'od-nordic', name: 'Nordic curl', sets: 3, min: 5, max: 8, unit: 'reps', rest: 120, equipment: 'Chevilles bloquées', cue: 'Descente la plus lente possible, réception sur les mains.' },
+      { id: 'od-mollets', name: 'Mollets sur une marche', sets: 3, min: 15, max: 15, unit: 'reps', rest: 60, equipment: 'Marche', cue: 'Talon bas, 1 s en haut. Plus dur : une jambe.' }
+    ],
+    finishers: []
+  },
+  OCA: {
+    letter: 'C', name: 'Cardio', subtitle: 'Fractionné', day: 'Mercredi',
+    exercises: [],
+    finishers: [
+      { id: 'od-cotes', name: 'Côte ou escaliers', desc: '5 min d\'échauffement, puis 8 à 12 montées de 30 s à fond, 90 s de récup en redescendant. +1 montée par semaine.', rounds: 12, work: 30, rest: 90, counter: 'rounds' },
+      { id: 'od-emom', name: 'EMOM 15 min', desc: 'Minute impaire : 8 burpees. Minute paire : 30 montées de genoux. Repos le reste de la minute.', rounds: 15, work: 60, rest: 0, counter: 'rounds' }
+    ]
+  },
+  OHB: {
+    letter: 'HB', name: 'Haut B', subtitle: 'Volume', day: 'Jeudi',
+    exercises: [
+      { id: 'od-trac', name: 'Tractions', sets: 4, min: 8, max: 12, unit: 'reps', rest: 90, equipment: 'Barre', cue: 'Sans lest. Varie la prise chaque semaine. Termine en négatives si moins de 8.' },
+      { id: 'od-pompes-decl', name: 'Pompes déclinées', sets: 4, min: 10, max: 15, unit: 'reps', rest: 90, equipment: 'Pieds sur un banc', cue: 'Coudes à 45°, poitrine jusqu\'au sol.' },
+      { id: 'od-row-serre', name: 'Rowing australien prise serrée', sets: 3, min: 10, max: 12, unit: 'reps', rest: 90, equipment: 'Barre basse', cue: 'Paumes vers toi, barre vers le bas de la poitrine.' },
+      { id: 'od-archer', name: 'Pompes archer', sets: 3, min: 6, max: 8, unit: 'reps', perSide: 'côté', rest: 90, equipment: 'Sol', cue: 'Descends vers une main, l\'autre bras reste tendu.' },
+      { id: 'od-ext-triceps', name: 'Extensions triceps à la barre', sets: 3, min: 10, max: 12, unit: 'reps', rest: 60, equipment: 'Barre basse ou banc', cue: 'Plie seulement les coudes, front sous la barre.' },
+      { id: 'od-hollow', name: 'Hollow body', sets: 3, min: 30, max: 30, unit: 'sec', rest: 60, equipment: 'Sol', cue: 'Bas du dos collé au sol.' }
+    ],
+    finishers: []
+  },
+  OBB: {
+    letter: 'BB', name: 'Bas B', subtitle: 'Explosif', day: 'Vendredi',
+    exercises: [
+      { id: 'od-squat-saute', name: 'Squats sautés', sets: 4, min: 8, max: 8, unit: 'reps', rest: 90, equipment: 'Sol', cue: 'Réception en douceur, courte pause entre chaque saut.' },
+      { id: 'od-fentes-march', name: 'Fentes marchées', sets: 3, min: 12, max: 12, unit: 'reps', perSide: 'jambe', rest: 90, equipment: 'Sac lesté (option)', cue: 'Genou arrière qui frôle le sol, enchaîne en avançant.' },
+      { id: 'od-stepup', name: 'Step-up sur banc haut', sets: 3, min: 10, max: 10, unit: 'reps', perSide: 'jambe', rest: 90, equipment: 'Banc ou muret', cue: 'Pousse seulement sur la jambe du dessus, redescends lentement.' },
+      { id: 'od-nordic-pont', name: 'Nordic curl ou pont fessier', sets: 3, min: 8, max: 12, unit: 'reps', rest: 90, equipment: 'Sol', cue: 'Pont fessier si les ischios sont encore courbaturés.' },
+      { id: 'od-releves', name: 'Relevés de jambes à la barre', sets: 3, min: 10, max: 10, unit: 'reps', rest: 60, equipment: 'Barre', cue: 'Épaules engagées, sans balancer, descente 2 s.' }
+    ],
+    finishers: []
+  }
+};
+
+const STREET_ABC_SESSIONS = {
+  SA: {
+    letter: 'A', name: 'Séance A', subtitle: 'Tirage + jambes', day: 'Lundi',
+    exercises: [
+      { id: 'sw-trac-pro', name: 'Tractions pronation', sets: 4, min: 3, max: 4, unit: 'reps', rest: 120, equipment: 'Barre', cue: 'Descente 3 s, bras tendus en bas. Demi-reps basses sur la dernière série.' },
+      { id: 'sw-row-feet', name: 'Tirages horizontaux pieds surélevés', sets: 3, min: 8, max: 12, unit: 'reps', rest: 75, equipment: 'Barre basse', cue: 'Corps gainé, poitrine à la barre, omoplates serrées.' },
+      { id: 'sw-bulgare', name: 'Squat bulgare', sets: 3, min: 8, max: 10, unit: 'reps', perSide: 'jambe', rest: 75, equipment: 'Élastique sous le pied avant', cue: 'Genou arrière qui frôle le sol, descente profonde.' },
+      { id: 'sw-curl', name: 'Curl biceps élastique', sets: 3, min: 12, max: 15, unit: 'reps', rest: 75, equipment: 'Élastique', cue: 'Coudes fixes, descente contrôlée.' },
+      { id: 'sw-mollets', name: 'Mollets une jambe sur marche', sets: 3, min: 12, max: 15, unit: 'reps', perSide: 'jambe', rest: 75, equipment: 'Marche', cue: 'Talon bien sous la marche. Demi-reps en bas sur la dernière série.' },
+      { id: 'sw-planche', name: 'Planche', sets: 3, min: 40, max: 40, unit: 'sec', rest: 60, equipment: 'Sol', cue: 'Fesses alignées, ventre serré.' }
+    ],
+    finishers: [{ id: 'sw-fin-corde', name: 'Corde à sauter', desc: '5 × (1 min corde / 30 s repos)', rounds: 5, work: 60, rest: 30, counter: 'rounds' }]
+  },
+  SB: {
+    letter: 'B', name: 'Séance B', subtitle: 'Poussée + charnière', day: 'Mercredi',
+    exercises: [
+      { id: 'sw-pompes', name: 'Pompes', sets: 4, min: 10, max: 15, unit: 'reps', rest: 120, equipment: 'Élastique sur le dos', cue: 'Descente 3 s. Élastique sur le dos pour charger.' },
+      { id: 'sw-pompes-surel', name: 'Pompes pieds surélevés', sets: 3, min: 8, max: 12, unit: 'reps', rest: 120, equipment: 'Muret / marche', cue: 'Corps gainé, coudes à 45°.' },
+      { id: 'sw-pike', name: 'Pike push-ups', sets: 3, min: 6, max: 10, unit: 'reps', rest: 120, equipment: 'Sol', cue: 'V inversé, tête vers le sol devant les mains.' },
+      { id: 'sw-diamant', name: 'Pompes diamant', sets: 3, min: 8, max: 12, unit: 'reps', rest: 120, equipment: 'Sol', cue: 'Mains jointes sous la poitrine, coudes serrés.' },
+      { id: 'sw-charniere', name: 'Charnière hanches unijambiste', sets: 3, min: 8, max: 10, unit: 'reps', perSide: 'jambe', rest: 75, equipment: 'Ou good morning élastique', cue: 'Dos plat, étirement des ischios en bas.' },
+      { id: 'sw-releves', name: 'Relevés de genoux suspendu', sets: 3, min: 8, max: 12, unit: 'reps', rest: 75, equipment: 'Barre', cue: 'Sans balancer, descente en 2 s.' },
+      { id: 'sw-facepull', name: 'Face pull élastique', sets: 3, min: 15, max: 20, unit: 'reps', rest: 75, equipment: 'Élastique', cue: 'Coudes hauts, mains vers le visage.' }
+    ],
+    finishers: [{ id: 'sw-fin-burpees', name: 'Burpees EMOM', desc: '6 burpees au début de chaque minute, 5 minutes', rounds: 5, work: 60, rest: 0, counter: 'rounds' }]
+  },
+  SC: {
+    letter: 'C', name: 'Séance C', subtitle: 'Complète', day: 'Vendredi',
+    exercises: [
+      { id: 'sw-trac-sup', name: 'Tractions supination', sets: 4, min: 3, max: 4, unit: 'reps', rest: 120, equipment: 'Barre', cue: 'Descente 4 s, bras tendus en bas.' },
+      { id: 'sw-pompes-archer', name: 'Pompes archer ou élastique fort', sets: 3, min: 6, max: 10, unit: 'reps', rest: 120, equipment: 'Élastique fort', cue: 'Reps par côté pour les archer.' },
+      { id: 'sw-squat-lent', name: 'Squat lent', sets: 3, min: 12, max: 15, unit: 'reps', rest: 75, equipment: 'Élastique fort sous les pieds', cue: '3 s de descente, 2 s de pause en bas.' },
+      { id: 'sw-tirage-vert', name: 'Tirage vertical élastique', sets: 3, min: 10, max: 12, unit: 'reps', rest: 75, equipment: 'Élastique fort à la barre', cue: 'Coudes vers les hanches.' },
+      { id: 'sw-pont', name: 'Pont fessier unijambiste', sets: 3, min: 10, max: 12, unit: 'reps', perSide: 'jambe', rest: 75, equipment: 'Sol', cue: 'Serre les fessiers 1 s en haut.' },
+      { id: 'sw-hollow', name: 'Hollow hold', sets: 3, min: 25, max: 30, unit: 'sec', rest: 60, equipment: 'Sol', cue: 'Bas du dos collé au sol.' }
+    ],
+    finishers: [{ id: 'sw-fin-circuit', name: 'Circuit 10 min', desc: 'En boucle : 30 s corde, 5 burpees, 10 squats, 8 pompes, 10 tirages horizontaux', rounds: 1, work: 600, rest: 0, counter: 'tours' }]
+  }
+};
+
+const TRAINING_PROGRAMS = {
+  odyssee: {
+    id: 'odyssee', name: 'Odyssée', label: 'Odyssée · 5 j', perWeek: 5, fixedDays: true,
+    order: ['OHA', 'OBA', 'OCA', 'OHB', 'OBB'], sessions: ODYSSEE_SESSIONS,
+    intro: 'Sécher en gardant le muscle. Cinq séances du lundi au vendredi, week-end off (marche ou rando tranquille).',
+    principles: [
+      'Répétitions : 8-12 en général, 5-6 pour la force, jusqu\'à 15 pour les petits muscles.',
+      'Arrête chaque série 2 à 3 reps avant l\'échec.',
+      'Repos : 2-3 min sur les exercices de force, 60-90 s sur le reste.',
+      'Tempo : descente contrôlée en 2-3 s, montée dynamique, pas d\'élan.',
+      'Échauffement 8-10 min : corde, rotations, 10 pompes faciles, 5 tractions scapulaires, 10 squats.',
+      'Progression : haut de la fourchette sur toutes les séries → variante plus dure ou +2,5 kg de lest.',
+      'Toutes les 4 à 6 semaines : semaine allégée, moitié moins de séries.',
+      'Après un chantier dur : enlève une série de tractions et de rowing. Vidé : seulement les 3 premiers exercices.'
+    ],
+    equipment: 'Barre de traction, barres parallèles (ou 2 chaises solides), banc, sac à dos lesté.'
+  },
+  abc: {
+    id: 'abc', name: 'Street A/B/C', label: 'A/B/C · 3 j', perWeek: 3, fixedDays: false,
+    order: ['SA', 'SB', 'SC'], sessions: STREET_ABC_SESSIONS,
+    intro: 'Perdre du ventre et se muscler, sans régime strict. Trois séances de 45 min à 1 h, en extérieur.',
+    principles: [
+      'Dernière série de chaque exercice proche de l\'échec, les autres à 2 reps de réserve.',
+      'Amplitude complète : bras tendus en bas des tractions, squats profonds.',
+      'Demi-reps en position étirée : mollets, ischios et dernière série de tractions seulement.',
+      'Repos : 2 min sur tractions et pompes, 60-90 s sur le reste.',
+      'Progression : toutes les séries en haut de la fourchette → variante plus dure ou +1 série (4 max).',
+      'Test de max pompes et tractions à la fin de chaque cycle de 4 semaines.'
+    ],
+    equipment: 'Barre de traction, 2 élastiques (léger, fort), corde à sauter.'
+  }
+};
+const PROGRAM_IDS = ['odyssee', 'abc'];
+
+// Flat lookup type → séance (each séance knows its programme)
+const STREET_PROGRAM = {};
+PROGRAM_IDS.forEach(pid => {
+  const prog = TRAINING_PROGRAMS[pid];
+  prog.order.forEach(t => { STREET_PROGRAM[t] = { ...prog.sessions[t], type: t, programId: pid }; });
+});
+const STREET_TYPES = Object.keys(STREET_PROGRAM);
+const isStreet = (s) => !!s && STREET_TYPES.includes(s.type);
+
+const loadActiveProgram = () => {
+  try {
+    const v = localStorage.getItem(ACTIVE_PROGRAM_KEY);
+    return TRAINING_PROGRAMS[v] ? v : DEFAULT_PROGRAM_ID;
+  } catch (e) { return DEFAULT_PROGRAM_ID; }
+};
+const saveActiveProgram = (id) => { try { localStorage.setItem(ACTIVE_PROGRAM_KEY, id); } catch (e) { /* ignore */ } };
+
+const streetRange = (ex) => ex.min === ex.max ? `${ex.max}` : `${ex.min}-${ex.max}`;
+const streetTarget = (ex, sets) => `${sets || ex.sets} × ${streetRange(ex)}${ex.unit === 'sec' ? ' s' : ''}${ex.perSide ? ` /${ex.perSide}` : ''}`;
+const sumSets = (sets) => (sets || []).reduce((a, b) => a + (Number(b) || 0), 0);
+const formatSets = (sets, unit) => (sets || []).join(' · ') + (unit === 'sec' ? ' s' : '');
+
+// Street sessions sorted oldest → newest (date, then id)
+const getStreetSorted = (sessions) => sessions
+  .filter(isStreet)
+  .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.id).localeCompare(String(b.id)));
+
+// Last logged sets for an exercise (optionally excluding the session being edited)
+const lastStreetLog = (sessions, exId, excludeId = null) => {
+  const sorted = getStreetSorted(sessions).filter(s => s.id !== excludeId);
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const e = (sorted[i].exercises || []).find(x => x.id === exId && Array.isArray(x.sets) && x.sets.length > 0);
+    if (e) return { ...e, date: sorted[i].date };
+  }
+  return null;
+};
+
+// Progression rule: every planned set at the top of the range → harder variant or +1 set (max 4)
+const streetProgression = (ex, log) => {
+  if (!log || !Array.isArray(log.sets) || log.sets.length < ex.sets) return null;
+  if (!log.sets.every(v => Number(v) >= ex.max)) return null;
+  if (ex.loaded) return '+2,5 kg de lest';
+  return log.sets.length >= STREET_MAX_SETS ? 'Variante plus dure' : '+1 série ou variante plus dure';
+};
+
+// Next séance: fixed-day programmes follow the weekday (Mon → 1st séance…);
+// otherwise the one after the last logged séance of that programme (A → B → C → A)
+const suggestStreetType = (sessions, programId = DEFAULT_PROGRAM_ID) => {
+  const prog = TRAINING_PROGRAMS[programId] || TRAINING_PROGRAMS[DEFAULT_PROGRAM_ID];
+  const weekday = (new Date().getDay() + 6) % 7; // 0 = Monday
+  if (prog.fixedDays && weekday < prog.order.length) return prog.order[weekday];
+  const st = getStreetSorted(sessions).filter(s => prog.order.includes(s.type));
+  if (st.length === 0) return prog.order[0];
+  const i = prog.order.indexOf(st[st.length - 1].type);
+  return prog.order[(i + 1) % prog.order.length];
+};
+
+// Street sessions per ISO week (target 3)
+const computeStreetWeeks = (sessions, numWeeks = 8) => {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const street = sessions.filter(isStreet);
+  const weeks = [];
+  for (let i = numWeeks - 1; i >= 0; i--) {
+    const start = new Date(monday);
+    start.setDate(monday.getDate() - i * 7);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+    const count = street.filter(s => {
+      const d = new Date(s.date + 'T12:00:00');
+      return d >= start && d < end;
+    }).length;
+    weeks.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, count, isCurrent: i === 0 });
+  }
+  return weeks;
+};
+
+// Audio beep (iPhone ignores navigator.vibrate, so a sound marks the end of rest)
+let streetAudioCtx = null;
+const streetUnlockAudio = () => {
+  try {
+    if (!streetAudioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) streetAudioCtx = new AC();
+    }
+    if (streetAudioCtx && streetAudioCtx.state === 'suspended') streetAudioCtx.resume();
+  } catch (e) { /* no audio */ }
+};
+const streetBeep = (count = 2) => {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    const ctx = streetAudioCtx;
+    if (!ctx) return;
+    for (let i = 0; i < count; i++) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = 880;
+      o.connect(g);
+      g.connect(ctx.destination);
+      const t = ctx.currentTime + i * 0.25;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.start(t);
+      o.stop(t + 0.2);
+    }
+  } catch (e) { /* no audio */ }
+};
+
+const streetCountdown = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// =============== STREET SESSION (chrono séries × reps, une main) ===============
+function StreetSession({ sessions, editing = null, initialType = 'OHA', programId = DEFAULT_PROGRAM_ID, onClose, onSave }) {
+  const [type, setType] = useState(editing ? editing.type : initialType);
+  const [phase, setPhase] = useState(editing ? 'summary' : 'setup'); // setup | work | finisher | summary
+  const [exIdx, setExIdx] = useState(0);
+  const [log, setLog] = useState(() => {
+    if (!editing) return {};
+    const out = {};
+    (editing.exercises || []).forEach(e => { out[e.id] = { sets: [...(e.sets || [])], planned: (e.sets || []).length, variant: e.variant || '' }; });
+    return out;
+  });
+  const [value, setValue] = useState(0);
+  const [restEnd, setRestEnd] = useState(null);
+  const [holdEnd, setHoldEnd] = useState(null);
+  const [holdStart, setHoldStart] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const [startedAt, setStartedAt] = useState(null);
+  const [finStart, setFinStart] = useState(null);
+  const [finResult, setFinResult] = useState(editing?.finisher || null);
+  const [finIdx, setFinIdx] = useState(0);
+  const [finTours, setFinTours] = useState(editing?.finisher?.tours || 0);
+  const [date, setDate] = useState(editing ? editing.date : todayISO());
+  const [bodyweight, setBodyweight] = useState(editing?.bodyweight != null ? String(editing.bodyweight) : '');
+  const [waist, setWaist] = useState(editing?.waist != null ? String(editing.waist) : '');
+  const [notes, setNotes] = useState(editing?.notes || '');
+  const lastFinPhase = React.useRef(null);
+
+  const prog = STREET_PROGRAM[type] || STREET_PROGRAM[TRAINING_PROGRAMS[DEFAULT_PROGRAM_ID].order[0]];
+  const progDef = TRAINING_PROGRAMS[prog.programId] || TRAINING_PROGRAMS[programId];
+  const exercises = prog.exercises;
+  const finishers = prog.finishers || [];
+  const editFinIdx = editing?.finisher ? finishers.findIndex(f => f.id === editing.finisher.id) : -1;
+  const fin = finishers[editFinIdx >= 0 ? editFinIdx : finIdx] || finishers[0] || null;
+  const finCalc = fin || { work: 1, rest: 0, rounds: 1 };
+  const goAfterExercises = () => setPhase(finishers.length > 0 ? 'finisher' : 'summary');
+  const excludeId = editing ? editing.id : null;
+
+  const getEntry = (ex) => {
+    if (log[ex.id]) return log[ex.id];
+    const last = lastStreetLog(sessions, ex.id, excludeId);
+    const planned = Math.min(STREET_MAX_SETS, Math.max(ex.sets, last ? last.sets.length : 0));
+    return { sets: [], planned, variant: last?.variant || '' };
+  };
+  const defaultValue = (ex, setIndex) => {
+    const last = lastStreetLog(sessions, ex.id, excludeId);
+    if (last && last.sets[setIndex] != null) return Number(last.sets[setIndex]);
+    if (last && last.sets.length > 0) return Number(last.sets[last.sets.length - 1]);
+    return ex.unit === 'sec' ? ex.max : ex.min;
+  };
+  const updateEntry = (ex, patch) => setLog(prev => ({ ...prev, [ex.id]: { ...getEntry(ex), ...(prev[ex.id] || {}), ...patch } }));
+
+  const currentEx = phase === 'work' ? exercises[exIdx] : null;
+  const currentEntry = currentEx ? getEntry(currentEx) : null;
+  const currentSetCount = currentEntry ? currentEntry.sets.length : 0;
+
+  // Pre-fill the stepper with last session's value for this set
+  useEffect(() => {
+    if (phase === 'work' && currentEx) setValue(defaultValue(currentEx, currentSetCount));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, exIdx, type, currentSetCount]);
+
+  // Clock tick
+  useEffect(() => {
+    if (phase !== 'work' && phase !== 'finisher') return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  // Keep the screen on
+  useEffect(() => {
+    let lock = null;
+    let cancelled = false;
+    const request = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          lock = await navigator.wakeLock.request('screen');
+          if (cancelled && lock) lock.release().catch(() => {});
+        }
+      } catch (e) { /* not supported */ }
+    };
+    if (phase === 'work' || phase === 'finisher') request();
+    const onVisible = () => { if (document.visibilityState === 'visible' && (phase === 'work' || phase === 'finisher')) request(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      if (lock) lock.release().catch(() => {});
+    };
+  }, [phase]);
+
+  // Auto-save in progress (resume after closing the app)
+  useEffect(() => {
+    if (editing) return;
+    if (phase === 'work' || phase === 'finisher') {
+      try {
+        localStorage.setItem(STREET_IN_PROGRESS_KEY, JSON.stringify({ type, phase, exIdx, log, startedAt, finResult, finTours, finIdx, savedAt: Date.now() }));
+      } catch (e) { /* storage full */ }
+    }
+  }, [editing, phase, type, exIdx, log, startedAt, finResult, finTours, finIdx]);
+
+  // Offer to resume on open
+  useEffect(() => {
+    if (editing) return;
+    try {
+      const raw = localStorage.getItem(STREET_IN_PROGRESS_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (Date.now() - data.savedAt < 6 * 60 * 60 * 1000 && STREET_PROGRAM[data.type]) {
+        if (confirm('Une séance street est en cours. Reprendre ?')) {
+          setType(data.type);
+          setLog(data.log || {});
+          setExIdx(data.exIdx || 0);
+          setStartedAt(data.startedAt || Date.now());
+          setFinResult(data.finResult || null);
+          setFinTours(data.finTours || 0);
+          setFinIdx(data.finIdx || 0);
+          setPhase(data.phase === 'finisher' ? 'finisher' : 'work');
+          return;
+        }
+      }
+      localStorage.removeItem(STREET_IN_PROGRESS_KEY);
+    } catch (e) { /* corrupt entry */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const clearInProgress = () => { try { localStorage.removeItem(STREET_IN_PROGRESS_KEY); } catch (e) { /* ignore */ } };
+
+  const startRest = (sec) => { if (sec > 0) setRestEnd(Date.now() + sec * 1000); };
+
+  const validateSet = (val) => {
+    const ex = exercises[exIdx];
+    const entry = getEntry(ex);
+    const sets = [...entry.sets, Math.max(0, Math.round(val))];
+    updateEntry(ex, { sets });
+    setHoldEnd(null);
+    setHoldStart(null);
+    startRest(ex.rest);
+    if (sets.length >= entry.planned) {
+      if (exIdx < exercises.length - 1) setExIdx(exIdx + 1);
+      else goAfterExercises();
+    }
+  };
+
+  // Rest end + hold end detection
+  useEffect(() => {
+    if (restEnd && now >= restEnd) { setRestEnd(null); streetBeep(2); }
+    if (holdEnd && now >= holdEnd) { streetBeep(3); validateSet(Math.round((holdEnd - holdStart) / 1000)); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now]);
+
+  // Finisher timer
+  const finCycle = finCalc.work + finCalc.rest;
+  const finTotal = finCalc.rounds * finCycle - finCalc.rest;
+  const finElapsed = finStart ? (now - finStart) / 1000 : 0;
+  const finRunning = finStart != null && !finResult;
+  const finRound = Math.min(finCalc.rounds, Math.floor(finElapsed / finCycle) + 1);
+  const finInCycle = finElapsed % finCycle;
+  const finIsWork = finInCycle < finCalc.work;
+  const finPhaseLeft = finIsWork ? finCalc.work - finInCycle : finCycle - finInCycle;
+
+  const stopFinisher = (completed) => {
+    if (!fin) return;
+    const doneRounds = completed ? fin.rounds : Math.min(fin.rounds, Math.floor(finElapsed / finCycle) + (finIsWork ? 0 : 1));
+    setFinResult({ id: fin.id, name: fin.name, rounds: doneRounds, tours: fin.counter === 'tours' ? finTours : null, duration: Math.round(Math.min(finElapsed, finTotal)) });
+    setFinStart(null);
+  };
+
+  useEffect(() => {
+    if (!finRunning) return;
+    if (finElapsed >= finTotal) { streetBeep(3); stopFinisher(true); return; }
+    const key = `${finRound}-${finIsWork}`;
+    if (lastFinPhase.current && lastFinPhase.current !== key) streetBeep(finIsWork ? 2 : 1);
+    lastFinPhase.current = key;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now]);
+
+  const start = () => {
+    streetUnlockAudio();
+    setStartedAt(Date.now());
+    setExIdx(0);
+    setPhase(exercises.length > 0 ? 'work' : 'finisher');
+  };
+
+  const handleClose = () => {
+    if (phase === 'work' || phase === 'finisher') {
+      if (!confirm('Quitter ? Tu pourras reprendre la séance pendant 6 h.')) return;
+    }
+    if (phase === 'summary' && !editing) {
+      if (!confirm('Abandonner cette séance sans l\'enregistrer ?')) return;
+      clearInProgress();
+    }
+    onClose();
+  };
+
+  const save = () => {
+    const toNum = (v) => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n; };
+    const exLogs = exercises.map(ex => {
+      const e = log[ex.id];
+      if (!e) return null;
+      const sets = e.sets.map(Number).filter(v => !isNaN(v) && v > 0);
+      if (sets.length === 0) return null;
+      return { id: ex.id, name: ex.name, unit: ex.unit, sets, variant: e.variant || '' };
+    }).filter(Boolean);
+    const finisher = finResult && fin ? { ...finResult, tours: fin.counter === 'tours' ? finTours : null } : null;
+    const session = {
+      ...(editing || {}),
+      date,
+      type,
+      mode: 'sets',
+      exercises: exLogs,
+      finisher,
+      totalTime: editing ? (editing.totalTime ?? null) : (startedAt ? Math.round((Date.now() - startedAt) / 1000) : null),
+      bodyweight: toNum(bodyweight),
+      waist: toNum(waist),
+      notes: notes.trim()
+    };
+    clearInProgress();
+    onSave(session);
+  };
+
+  const editVariant = (ex) => {
+    const entry = getEntry(ex);
+    const v = prompt(`Variante pour « ${ex.name} » (ex. élastique fort, pieds surélevés) :`, entry.variant || '');
+    if (v !== null) updateEntry(ex, { variant: v.trim() });
+  };
+
+  const st = streetStyles;
+
+  // ---------- SETUP ----------
+  if (phase === 'setup') {
+    return (
+      <div style={styles.stopwatchModal}>
+        <div style={{ ...styles.stopwatchSetup, maxWidth: 520 }}>
+          <div style={styles.stopwatchSetupHeader}>
+            <h2 style={{ ...styles.modalTitle, color: STREET_COLOR }}>Séance street</h2>
+            <button style={styles.swCloseBtn} onClick={onClose} aria-label="Fermer"><X size={20} /></button>
+          </div>
+          <div style={st.setupProgram}>{progDef.label}</div>
+          <div style={{ ...st.typeRow, gridTemplateColumns: `repeat(${progDef.order.length}, minmax(0, 1fr))` }}>
+            {progDef.order.map(t => (
+              <button key={t} style={{ ...st.typeBtn, ...(type === t ? st.typeBtnActive : {}) }} onClick={() => { setType(t); setLog({}); setFinIdx(0); }}>
+                <span style={st.typeLetter}>{STREET_PROGRAM[t].name}</span>
+                <span style={st.typeSub}>{STREET_PROGRAM[t].day.slice(0, 3)}</span>
+              </button>
+            ))}
+          </div>
+          <div style={st.setupList}>
+            {exercises.map((ex, i) => {
+              const last = lastStreetLog(sessions, ex.id);
+              const badge = streetProgression(ex, last);
+              return (
+                <div key={ex.id} style={st.setupRow}>
+                  <div style={st.setupNum}>{i + 1}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={st.setupName}>{ex.name}</div>
+                    <div style={st.setupMeta}>
+                      {streetTarget(ex)}{last ? ` · dernière fois : ${formatSets(last.sets, ex.unit)}` : ''}
+                    </div>
+                    {badge && <div style={st.badge}><TrendingUp size={11} /> {badge}</div>}
+                  </div>
+                </div>
+              );
+            })}
+            {finishers.map((f, i) => (
+              <button
+                key={f.id}
+                style={{ ...st.setupRow, ...st.setupFin, ...(finishers.length > 1 && i === finIdx ? { borderColor: STREET_COLOR } : {}) }}
+                onClick={() => setFinIdx(i)}
+              >
+                <div style={{ ...st.setupNum, background: finishers.length > 1 && i === finIdx ? STREET_COLOR : '#333', color: finishers.length > 1 && i === finIdx ? '#0a0a0a' : '#aaa' }}>
+                  {finishers.length > 1 ? (i === finIdx ? '✓' : i + 1) : '★'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={st.setupName}>{f.name}{finishers.length > 1 ? (i === 0 ? ' · option 1' : ` · option ${i + 1}`) : ''}</div>
+                  <div style={st.setupMeta}>{f.desc}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <button style={{ ...styles.stopwatchStartBtn, background: STREET_COLOR }} onClick={start}>
+            <Play size={20} /> Démarrer {prog.name}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- WORK ----------
+  if (phase === 'work' && currentEx) {
+    const ex = currentEx;
+    const entry = currentEntry;
+    const isSec = ex.unit === 'sec';
+    const step = isSec ? 5 : 1;
+    const resting = restEnd && now < restEnd;
+    const holding = holdEnd && now < holdEnd;
+    const last = lastStreetLog(sessions, ex.id, excludeId);
+    const doneSets = exercises.reduce((n, e) => n + getEntry(e).sets.length, 0);
+    const plannedSets = exercises.reduce((n, e) => n + getEntry(e).planned, 0);
+    const isLastSet = entry.sets.length === entry.planned - 1;
+    return (
+      <div style={styles.stopwatchModal}>
+        <div style={styles.stopwatchRunning}>
+          <div style={styles.swTop}>
+            <span style={{ ...st.topLabel, color: STREET_COLOR }}>{prog.name} · {exIdx + 1}/{exercises.length}</span>
+            <button style={styles.swCloseBtn} onClick={handleClose} aria-label="Quitter"><X size={20} /></button>
+          </div>
+          <div style={styles.swProgressBg}>
+            <div style={{ ...styles.swProgressFill, background: STREET_COLOR, width: `${plannedSets ? (doneSets / plannedSets) * 100 : 0}%` }} />
+          </div>
+
+          <div style={st.exHeader}>
+            <div style={st.exName}>{ex.name}</div>
+            <div style={st.exTarget}>{streetTarget(ex, entry.planned)}</div>
+            <div style={st.exCue}>{ex.cue}{isLastSet && ex.cue.includes('dernière série') ? ' ← maintenant' : ''}</div>
+            <button style={st.variantBtn} onClick={() => editVariant(ex)}>
+              {entry.variant ? `Variante : ${entry.variant}` : '+ variante'}
+            </button>
+          </div>
+
+          <div style={st.setDots}>
+            {Array.from({ length: entry.planned }).map((_, i) => (
+              <div key={i} style={{ ...st.setDot, ...(i < entry.sets.length ? st.setDotDone : i === entry.sets.length ? st.setDotCurrent : {}) }}>
+                {i < entry.sets.length ? entry.sets[i] : i + 1}
+              </div>
+            ))}
+          </div>
+          <div style={st.lastLine}>
+            {last ? `Dernière fois (${new Date(last.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}) : ${formatSets(last.sets, ex.unit)}` : 'Première fois sur cet exercice'}
+          </div>
+
+          {resting && (
+            <div style={st.restBox}>
+              <div style={st.restLabel}>Repos</div>
+              <div style={st.restTime}>{streetCountdown(restEnd - now)}</div>
+              <button style={st.restSkip} onClick={() => setRestEnd(null)}>Passer le repos</button>
+            </div>
+          )}
+
+          {holding ? (
+            <div style={{ ...st.restBox, borderColor: STREET_COLOR }}>
+              <div style={st.restLabel}>Tiens</div>
+              <div style={{ ...st.restTime, color: STREET_COLOR }}>{streetCountdown(holdEnd - now)}</div>
+              <button style={st.restSkip} onClick={() => validateSet(Math.round((now - holdStart) / 1000))}>Arrêter et valider</button>
+            </div>
+          ) : (
+            <>
+              <div style={st.stepper}>
+                <button style={st.stepBtn} onClick={() => setValue(v => Math.max(0, v - step))} aria-label="Moins"><Minus size={32} /></button>
+                <div style={st.stepValue}>
+                  {value}
+                  <div style={st.stepUnit}>{isSec ? 'secondes' : ex.perSide ? `reps / ${ex.perSide}` : 'reps'}</div>
+                </div>
+                <button style={st.stepBtn} onClick={() => setValue(v => v + step)} aria-label="Plus"><Plus size={32} /></button>
+              </div>
+              {isSec ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+                  <button
+                    style={{ ...styles.swMainBtn, minHeight: 90, background: STREET_COLOR, marginTop: 0 }}
+                    onClick={() => { streetUnlockAudio(); setRestEnd(null); setHoldStart(Date.now()); setHoldEnd(Date.now() + value * 1000); }}
+                  >
+                    <Timer size={26} /> Lancer {value} s
+                  </button>
+                  <button style={{ ...styles.swMainBtn, minHeight: 90, background: '#2a2a2a', color: '#ccc', fontSize: 18, marginTop: 0 }} onClick={() => validateSet(value)}>
+                    <Check size={22} /> Valider
+                  </button>
+                </div>
+              ) : (
+                <button style={{ ...styles.swMainBtn, minHeight: 84, background: STREET_COLOR, marginTop: 0 }} onClick={() => validateSet(value)}>
+                  <Check size={30} /> Série validée
+                </button>
+              )}
+            </>
+          )}
+
+          <div style={st.smallRow}>
+            <button style={{ ...styles.swSecondaryBtn, ...st.smallBtn }} disabled={exIdx === 0} onClick={() => setExIdx(Math.max(0, exIdx - 1))}><ChevronLeft size={14} /> Préc.</button>
+            <button
+              style={{ ...styles.swSecondaryBtn, ...st.smallBtn }}
+              disabled={entry.sets.length === 0}
+              onClick={() => updateEntry(ex, { sets: entry.sets.slice(0, -1) })}
+            >
+              <RotateCcw size={14} /> Annuler
+            </button>
+            <button
+              style={{ ...styles.swSecondaryBtn, ...st.smallBtn }}
+              onClick={() => {
+                if (entry.planned < STREET_MAX_SETS) updateEntry(ex, { planned: entry.planned + 1 });
+                else if (entry.planned > Math.max(1, entry.sets.length)) updateEntry(ex, { planned: entry.planned - 1 });
+              }}
+            >
+              {entry.planned < STREET_MAX_SETS ? '+1 série' : '−1 série'}
+            </button>
+            <button
+              style={{ ...styles.swSecondaryBtn, ...st.smallBtn }}
+              onClick={() => { if (exIdx < exercises.length - 1) setExIdx(exIdx + 1); else goAfterExercises(); }}
+            >
+              Suiv. <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- FINISHER ----------
+  if (phase === 'finisher' && fin) {
+    const resting = restEnd && now < restEnd;
+    return (
+      <div style={styles.stopwatchModal}>
+        <div style={styles.stopwatchRunning}>
+          <div style={styles.swTop}>
+            <span style={{ ...st.topLabel, color: STREET_COLOR }}>{prog.name} · Finisher</span>
+            <button style={styles.swCloseBtn} onClick={handleClose} aria-label="Quitter"><X size={20} /></button>
+          </div>
+          <div style={st.exHeader}>
+            <div style={st.exName}>{fin.name}</div>
+            <div style={st.exCue}>{fin.desc}</div>
+          </div>
+
+          {resting && !finStart && !finResult && (
+            <div style={st.restBox}>
+              <div style={st.restLabel}>Repos</div>
+              <div style={st.restTime}>{streetCountdown(restEnd - now)}</div>
+              <button style={st.restSkip} onClick={() => setRestEnd(null)}>Passer le repos</button>
+            </div>
+          )}
+
+          {finRunning && (
+            <div style={{ ...st.restBox, borderColor: finIsWork ? STREET_COLOR : '#2a2a2a' }}>
+              <div style={st.restLabel}>
+                {fin.rounds > 1 ? `Tour ${finRound}/${fin.rounds} · ` : ''}{finIsWork ? (fin.rest === 0 && fin.rounds > 1 ? 'Go puis récup' : 'Effort') : 'Repos'}
+              </div>
+              <div style={{ ...st.restTime, color: finIsWork ? STREET_COLOR : '#888' }}>{streetCountdown(finPhaseLeft * 1000)}</div>
+            </div>
+          )}
+
+          {finRunning && fin.counter === 'tours' && (
+            <div style={st.stepper}>
+              <button style={st.stepBtn} onClick={() => setFinTours(t => Math.max(0, t - 1))} aria-label="Moins"><Minus size={32} /></button>
+              <div style={st.stepValue}>{finTours}<div style={st.stepUnit}>tours</div></div>
+              <button style={st.stepBtn} onClick={() => setFinTours(t => t + 1)} aria-label="Plus"><Plus size={32} /></button>
+            </div>
+          )}
+
+          {finResult && (
+            <div style={st.restBox}>
+              <div style={st.restLabel}>Fait</div>
+              <div style={{ ...st.restTime, fontSize: 40 }}>
+                {fin.counter === 'tours' ? `${finTours} tours` : `${finResult.rounds}/${fin.rounds} tours`}
+              </div>
+            </div>
+          )}
+
+          {!finStart && !finResult && finishers.length > 1 && (
+            <div style={st.typeRow}>
+              {finishers.map((f, i) => (
+                <button key={f.id} style={{ ...st.typeBtn, ...(i === finIdx ? st.typeBtnActive : {}) }} onClick={() => setFinIdx(i)}>
+                  <span style={{ ...st.typeSub, color: i === finIdx ? '#fff' : '#888' }}>{f.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!finStart && !finResult && (
+            <>
+              <button style={{ ...styles.swMainBtn, background: STREET_COLOR }} onClick={() => { streetUnlockAudio(); setRestEnd(null); lastFinPhase.current = null; setFinStart(Date.now()); }}>
+                <Play size={30} /> Démarrer le finisher
+              </button>
+              <button style={{ ...styles.swSecondaryBtn, ...st.smallBtn }} onClick={() => setPhase('summary')}>Passer le finisher</button>
+            </>
+          )}
+          {finRunning && (
+            <button style={{ ...styles.swMainBtn, background: '#2a2a2a', color: '#ccc' }} onClick={() => stopFinisher(false)}>
+              <Pause size={28} /> Arrêter
+            </button>
+          )}
+          {finResult && (
+            <button style={{ ...styles.swMainBtn, background: STREET_COLOR }} onClick={() => setPhase('summary')}>
+              <Check size={30} /> Terminer la séance
+            </button>
+          )}
+          {exercises.length > 0 && (
+            <div style={st.smallRow}>
+              <button style={{ ...styles.swSecondaryBtn, ...st.smallBtn }} onClick={() => { setFinStart(null); setPhase('work'); setExIdx(exercises.length - 1); }}><ChevronLeft size={14} /> Exercices</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- SUMMARY / EDIT ----------
+  const totalSets = exercises.reduce((n, ex) => n + ((log[ex.id]?.sets || []).length), 0);
+  return (
+    <div style={styles.modal}>
+      <div style={{ ...styles.modalContent, maxWidth: 560 }}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ ...styles.modalTitle, color: STREET_COLOR }}>{editing ? 'Modifier' : 'Bilan'} · {prog.name}</h2>
+          <button style={styles.swCloseBtn} onClick={handleClose} aria-label="Fermer"><X size={20} /></button>
+        </div>
+        <div style={styles.formGrid2}>
+          <div>
+            <label style={styles.formLabel}>Date</label>
+            <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div>
+            <label style={styles.formLabel}>Durée</label>
+            <div style={{ ...styles.input, color: '#888' }}>
+              {editing ? (editing.totalTime ? formatTime(editing.totalTime) : '—') : (startedAt ? formatTime((Date.now() - startedAt) / 1000) : '—')}
+            </div>
+          </div>
+        </div>
+
+        <div style={st.sumList}>
+          {exercises.map(ex => {
+            const e = log[ex.id];
+            const sets = e?.sets || [];
+            return (
+              <div key={ex.id} style={st.sumRow}>
+                <div style={st.sumName}>
+                  {ex.name}
+                  <span style={st.sumTarget}>{streetTarget(ex)}{e?.variant ? ` · ${e.variant}` : ''}</span>
+                </div>
+                <div style={st.sumSets}>
+                  {sets.length === 0 && <span style={{ color: '#555', fontSize: 11 }}>non fait</span>}
+                  {sets.map((v, i) => (
+                    <input
+                      key={i}
+                      type="number"
+                      inputMode="numeric"
+                      style={st.sumInput}
+                      value={v}
+                      onChange={ev => {
+                        const next = [...sets];
+                        next[i] = ev.target.value === '' ? '' : Number(ev.target.value);
+                        updateEntry(ex, { sets: next });
+                      }}
+                    />
+                  ))}
+                  <button style={styles.iconBtnSmall} onClick={() => updateEntry(ex, { sets: [...sets, defaultValue(ex, sets.length)] })}>+</button>
+                </div>
+              </div>
+            );
+          })}
+          {fin && (
+          <div style={st.sumRow}>
+            <div style={st.sumName}>{fin.name}<span style={st.sumTarget}>{fin.desc}</span></div>
+            <div style={st.sumSets}>
+              {fin.counter === 'tours' ? (
+                <>
+                  <input type="number" inputMode="numeric" style={st.sumInput} value={finTours} onChange={ev => { setFinTours(Number(ev.target.value) || 0); if (!finResult) setFinResult({ id: fin.id, name: fin.name, rounds: 1, tours: null, duration: fin.work }); }} />
+                  <span style={{ fontSize: 11, color: '#888' }}>tours</span>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    style={st.sumInput}
+                    value={finResult ? finResult.rounds : 0}
+                    onChange={ev => {
+                      const r = Math.max(0, Math.min(fin.rounds, Number(ev.target.value) || 0));
+                      setFinResult(r > 0 ? { id: fin.id, name: fin.name, rounds: r, tours: null, duration: finResult?.duration ?? null } : null);
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: '#888' }}>/ {fin.rounds} tours</span>
+                </>
+              )}
+            </div>
+          </div>
+          )}
+        </div>
+
+        <div style={styles.formGrid2}>
+          <div>
+            <label style={styles.formLabel}>Poids (kg)</label>
+            <input type="text" inputMode="decimal" style={styles.input} value={bodyweight} onChange={e => setBodyweight(e.target.value)} placeholder="optionnel" />
+          </div>
+          <div>
+            <label style={styles.formLabel}>Tour de taille (cm)</label>
+            <input type="text" inputMode="decimal" style={styles.input} value={waist} onChange={e => setWaist(e.target.value)} placeholder="nombril, à jeun" />
+          </div>
+        </div>
+        <div style={styles.formSection}>
+          <label style={styles.formLabel}>Notes</label>
+          <input type="text" style={styles.input} value={notes} onChange={e => setNotes(e.target.value)} placeholder="sol mouillé, chantier dur, douleur…" />
+        </div>
+        <div style={styles.formActions}>
+          <button style={styles.secondaryBtn} onClick={handleClose}>Annuler</button>
+          <button style={{ ...styles.primaryBtn, background: STREET_COLOR }} onClick={save} disabled={totalSets === 0 && !finResult}>
+            <Save size={14} /> Enregistrer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============== STREET TAB (suivi du programme séries × reps) ===============
+function StreetTab({ sessions, activeProgram = DEFAULT_PROGRAM_ID, onChangeProgram, onStart, onEdit, onDelete }) {
+  const progDef = TRAINING_PROGRAMS[activeProgram] || TRAINING_PROGRAMS[DEFAULT_PROGRAM_ID];
+  const chartTypes = progDef.order.filter(t => STREET_PROGRAM[t].exercises.length > 0);
+  const [chartTypeRaw, setChartType] = useState(chartTypes[0]);
+  const [chartExIdRaw, setChartExId] = useState(STREET_PROGRAM[chartTypes[0]].exercises[0].id);
+  const chartType = chartTypes.includes(chartTypeRaw) ? chartTypeRaw : chartTypes[0];
+  const chartExId = STREET_PROGRAM[chartType].exercises.some(e => e.id === chartExIdRaw) ? chartExIdRaw : STREET_PROGRAM[chartType].exercises[0].id;
+  const street = useMemo(() => getStreetSorted(sessions), [sessions]);
+  const weeks = useMemo(() => computeStreetWeeks(sessions.filter(s => progDef.order.includes(s.type))), [sessions, progDef]);
+  const next = suggestStreetType(sessions, progDef.id);
+  const current = weeks[weeks.length - 1];
+  const st = streetStyles;
+
+  const chartEx = streetExerciseById(chartExId) || STREET_PROGRAM[chartType].exercises[0];
+  const chartData = street
+    .map(s => {
+      const e = (s.exercises || []).find(x => x.id === chartExId);
+      if (!e || !e.sets || e.sets.length === 0) return null;
+      return { date: new Date(s.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }), total: sumSets(e.sets), best: Math.max(...e.sets.map(Number)) };
+    })
+    .filter(Boolean);
+  const waistData = street
+    .filter(s => s.waist != null)
+    .map(s => ({ date: new Date(s.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }), waist: s.waist }));
+  const waistDelta = waistData.length >= 2 ? waistData[waistData.length - 1].waist - waistData[0].waist : null;
+
+  const tooltipStyle = { background: '#141414', border: '1px solid #2a2a2a', borderRadius: 3, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" };
+
+  return (
+    <div style={styles.dashboard}>
+      <ProgramPicker activeProgram={progDef.id} onChange={onChangeProgram} />
+      <button style={{ ...styles.stopwatchStartBtn, background: STREET_COLOR }} onClick={() => onStart(next)}>
+        <Play size={20} /> Démarrer {STREET_PROGRAM[next].name} · {STREET_PROGRAM[next].subtitle}
+      </button>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Régularité</h3>
+          <span style={styles.cardSubtitle}>cette semaine : {current.count}/{progDef.perWeek}</span>
+        </div>
+        <div style={st.weekRow}>
+          {weeks.map((w, i) => (
+            <div key={i} style={st.weekCol}>
+              <div style={st.weekBars}>
+                {Array.from({ length: progDef.perWeek }, (_, k) => k).map(k => (
+                  <div key={k} style={{ ...st.weekBar, background: k < w.count ? STREET_COLOR : '#1f1f1f', opacity: w.isCurrent && k >= w.count ? 0.5 : 1 }} />
+                ))}
+              </div>
+              <div style={{ ...st.weekLabel, color: w.isCurrent ? '#fff' : '#555' }}>{w.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Où tu en es</h3>
+          <span style={styles.cardSubtitle}>dernière séance par exercice</span>
+        </div>
+        {progDef.order.map(t => (
+          <div key={t} style={{ marginBottom: 14 }}>
+            <div style={st.groupTitle}>{STREET_PROGRAM[t].name} · {STREET_PROGRAM[t].subtitle}</div>
+            {STREET_PROGRAM[t].exercises.length === 0 && (() => {
+              const lastCardio = [...street].reverse().find(s => s.type === t && s.finisher);
+              return (
+                <div style={st.progRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={st.progName}>{STREET_PROGRAM[t].finishers.map(f => f.name).join(' ou ')}</div>
+                    <div style={st.progMeta}>dernière séance</div>
+                  </div>
+                  <div style={st.progVal}>
+                    {lastCardio ? `${lastCardio.finisher.name || ''} · ${lastCardio.finisher.rounds} tours` : '—'}
+                  </div>
+                </div>
+              );
+            })()}
+            {STREET_PROGRAM[t].exercises.map(ex => {
+              const last = lastStreetLog(sessions, ex.id);
+              const badge = streetProgression(ex, last);
+              return (
+                <div key={ex.id} style={st.progRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={st.progName}>{ex.name}</div>
+                    <div style={st.progMeta}>{streetTarget(ex)}{last?.variant ? ` · ${last.variant}` : ''}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={st.progVal}>{last ? formatSets(last.sets, ex.unit) : '—'}</div>
+                    {badge && <div style={st.badge}><TrendingUp size={11} /> {badge}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Progression</h3>
+          <span style={styles.cardSubtitle}>{chartEx.unit === 'sec' ? 'total secondes' : 'total reps'} par séance</span>
+        </div>
+        <div style={st.chipRow} data-scroll-row>
+          {chartTypes.map(t => (
+            <button
+              key={t}
+              style={{ ...st.chip, ...(chartType === t ? st.chipActive : {}) }}
+              onClick={() => { setChartType(t); setChartExId(STREET_PROGRAM[t].exercises[0].id); }}
+            >
+              {STREET_PROGRAM[t].name}
+            </button>
+          ))}
+        </div>
+        <div style={st.chipRow} data-scroll-row>
+          {STREET_PROGRAM[chartType].exercises.map(ex => (
+            <button key={ex.id} style={{ ...st.chip, ...(chartExId === ex.id ? st.chipActive : {}) }} onClick={() => setChartExId(ex.id)}>
+              {ex.name}
+            </button>
+          ))}
+        </div>
+        {chartData.length < 2 ? (
+          <p style={st.empty}>{chartData.length === 0 ? 'Pas encore de données sur cet exercice.' : 'Une séance enregistrée : la courbe apparaît à la deuxième.'}</p>
+        ) : (
+          <div style={{ width: '100%', height: 200 }}>
+            <ResponsiveContainer>
+              <LineChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid stroke="#1f1f1f" vertical={false} />
+                <XAxis dataKey="date" stroke="#555" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#555" tick={{ fontSize: 10 }} allowDecimals={false} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [v, n === 'total' ? 'Total' : 'Meilleure série']} />
+                <Line type="monotone" dataKey="total" stroke={STREET_COLOR} strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="best" stroke="#888" strokeWidth={1} strokeDasharray="4 3" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Tour de taille</h3>
+          <span style={styles.cardSubtitle}>
+            {waistDelta != null ? `${waistDelta > 0 ? '+' : ''}${waistDelta.toFixed(1)} cm depuis le début` : 'nombril · à jeun · 1×/semaine'}
+          </span>
+        </div>
+        {waistData.length < 2 ? (
+          <p style={st.empty}>Note ton tour de taille dans le bilan d'une séance par semaine. La courbe apparaît à la deuxième mesure.</p>
+        ) : (
+          <div style={{ width: '100%', height: 180 }}>
+            <ResponsiveContainer>
+              <LineChart data={waistData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid stroke="#1f1f1f" vertical={false} />
+                <XAxis dataKey="date" stroke="#555" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#555" tick={{ fontSize: 10 }} domain={['dataMin - 2', 'dataMax + 2']} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v} cm`, 'Tour de taille']} />
+                <Line type="monotone" dataKey="waist" stroke="#ffc94d" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Historique street</h3>
+          <span style={styles.cardSubtitle}>{street.length} séance{street.length > 1 ? 's' : ''}</span>
+        </div>
+        {street.length === 0 ? (
+          <p style={st.empty}>Aucune séance street pour l'instant.</p>
+        ) : (
+          <div style={styles.sessionList}>
+            {[...street].reverse().map(s => {
+              const p = STREET_PROGRAM[s.type];
+              const sets = (s.exercises || []).reduce((n, e) => n + (e.sets || []).length, 0);
+              return (
+                <div key={s.id} style={{ ...styles.sessionRow, gap: 12, padding: '12px 4px' }}>
+                  <div style={{ ...styles.sessionType, color: STREET_COLOR }}>{p ? p.letter : '?'}</div>
+                  <div style={styles.sessionInfo}>
+                    <div style={styles.sessionDate}>
+                      {new Date(s.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'long' })}
+                    </div>
+                    <div style={styles.sessionMeta}>
+                      <span>{sets} séries</span>
+                      {s.totalTime ? <span>⏱ {formatTime(s.totalTime)}</span> : null}
+                      {s.finisher ? <span>★ {s.finisher.tours != null ? `${s.finisher.tours} tours` : `${s.finisher.rounds} tours`}</span> : null}
+                      {s.bodyweight ? <span>⚖ {s.bodyweight}kg</span> : null}
+                      {s.waist ? <span>◯ {s.waist}cm</span> : null}
+                      {s.notes ? <span style={{ opacity: 0.6, fontStyle: 'italic' }}>· {s.notes}</span> : null}
+                    </div>
+                  </div>
+                  <div style={styles.sessionActions}>
+                    <button style={styles.iconBtnSmall} onClick={() => onEdit(s.id)}>Éditer</button>
+                    <button style={styles.iconBtnSmallDanger} onClick={() => onDelete(s.id)} aria-label="Supprimer"><Trash2 size={12} /></button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============== PROGRAM PICKER (choix du programme actif, mémorisé) ===============
+function ProgramPicker({ activeProgram, onChange }) {
+  const st = streetStyles;
+  return (
+    <div style={st.picker}>
+      {PROGRAM_IDS.map(pid => (
+        <button
+          key={pid}
+          style={{ ...st.pickerBtn, ...(activeProgram === pid ? st.pickerBtnActive : {}) }}
+          onClick={() => onChange && onChange(pid)}
+        >
+          {TRAINING_PROGRAMS[pid].label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// =============== STREET PROGRAM (page descriptive, onglet Programme) ===============
+function StreetProgram({ programId = DEFAULT_PROGRAM_ID, onChangeProgram }) {
+  const progDef = TRAINING_PROGRAMS[programId] || TRAINING_PROGRAMS[DEFAULT_PROGRAM_ID];
+  const [activeRaw, setActive] = useState(progDef.order[0]);
+  const active = progDef.order.includes(activeRaw) ? activeRaw : progDef.order[0];
+  const p = STREET_PROGRAM[active];
+  const st = streetStyles;
+  const dayNames = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+  const week = dayNames.map(day => {
+    const t = progDef.order.find(x => STREET_PROGRAM[x].day === day);
+    return { day, activity: t ? STREET_PROGRAM[t].name : (progDef.id === 'odyssee' ? 'Marche / rando' : 'Repos'), on: !!t };
+  });
+  return (
+    <>
+      <ProgramPicker activeProgram={progDef.id} onChange={onChangeProgram} />
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={{ ...styles.cardTitle, color: STREET_COLOR }}>{progDef.name} · {progDef.order.length} séances</h3>
+          <span style={styles.cardSubtitle}>{progDef.perWeek} j / semaine</span>
+        </div>
+        <p style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6, margin: '0 0 8px 0' }}>{progDef.intro}</p>
+        <div style={{ fontSize: 11, color: '#666', fontFamily: "'JetBrains Mono', monospace", margin: '0 0 12px 0' }}>Matériel : {progDef.equipment}</div>
+        <ul style={styles.exerciseCues}>
+          {progDef.principles.map((c, i) => <li key={i} style={styles.exerciseCue}>{c}</li>)}
+        </ul>
+      </div>
+
+      <div style={styles.setToggle} data-scroll-row>
+        {progDef.order.map(t => (
+          <button
+            key={t}
+            style={{ ...styles.setToggleBtn, flexShrink: 0, ...(active === t ? { ...styles.setToggleBtnActive, background: STREET_COLOR, color: '#0a0a0a' } : {}) }}
+            onClick={() => setActive(t)}
+          >
+            {STREET_PROGRAM[t].name}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={{ ...styles.cardTitle, color: STREET_COLOR }}>{p.name} — {p.subtitle}</h3>
+          <span style={styles.cardSubtitle}>{p.day}</span>
+        </div>
+        <div style={styles.exerciseList}>
+          {p.exercises.map((ex, idx) => (
+            <div key={ex.id} style={styles.exerciseItem}>
+              <div style={{ ...styles.exerciseNumber, background: STREET_COLOR }}>{idx + 1}</div>
+              <div style={styles.exerciseContent}>
+                <div style={styles.exerciseHeader}>
+                  <span style={styles.exerciseName}>{ex.name}</span>
+                  <span style={styles.exerciseEquipment}>{streetTarget(ex)}</span>
+                </div>
+                <div style={st.progMeta}>{ex.equipment} · repos {ex.rest >= 120 ? `${(ex.rest / 60).toString().replace('.', ',')} min` : `${ex.rest} s`}</div>
+                <p style={{ fontSize: 12, color: '#aaa', margin: '6px 0 0 0', lineHeight: 1.5 }}>{ex.cue}</p>
+              </div>
+            </div>
+          ))}
+          {(p.finishers || []).map((f, i) => (
+            <div key={f.id} style={styles.exerciseItem}>
+              <div style={{ ...styles.exerciseNumber, background: '#666' }}>{p.finishers.length > 1 ? i + 1 : '★'}</div>
+              <div style={styles.exerciseContent}>
+                <div style={styles.exerciseHeader}>
+                  <span style={styles.exerciseName}>{f.name}</span>
+                  <span style={styles.exerciseEquipment}>{p.exercises.length ? 'finisher' : p.finishers.length > 1 ? `option ${i + 1}` : 'séance'}</span>
+                </div>
+                <p style={{ fontSize: 12, color: '#aaa', margin: 0, lineHeight: 1.5 }}>{f.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h3 style={styles.cardTitle}>Plan hebdomadaire</h3>
+          <span style={styles.cardSubtitle}>{progDef.label}</span>
+        </div>
+        <div style={styles.weekPlan}>
+          {week.map((d, i) => (
+            <div key={i} style={styles.weekDay}>
+              <div style={styles.weekDayName}>{d.day}</div>
+              <div style={{ ...styles.weekDayActivity, background: d.on ? STREET_COLOR : '#333', color: d.on ? '#0a0a0a' : '#aaa' }}>{d.activity}</div>
+            </div>
+          ))}
+        </div>
+        <div style={styles.weekNote}>
+          <strong>Perte de ventre :</strong> léger déficit (300-500 kcal), protéines 1,6-2 g/kg, 7 h de sommeil. Tour de taille au nombril, à jeun, une fois par semaine.
+          <br /><strong>Douleur articulaire</strong> (pas une courbature) : arrête l'exercice et passe à la variante plus facile.
+        </div>
+      </div>
+    </>
+  );
+}
+
+const streetExerciseById = (id) => {
+  for (const t of STREET_TYPES) {
+    const e = STREET_PROGRAM[t].exercises.find(x => x.id === id);
+    if (e) return e;
+  }
+  return null;
+};
+
+const streetStyles = {
+  typeRow: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, marginBottom: 16 },
+  setupProgram: { fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", marginBottom: 8 },
+  setupFin: { width: '100%', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit' },
+  picker: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: '#141414', border: '1px solid #1f1f1f', borderRadius: 4, padding: 4 },
+  pickerBtn: { background: 'transparent', color: '#888', border: 'none', padding: '10px 8px', fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: 1.5, borderRadius: 3, fontWeight: 600 },
+  pickerBtnActive: { background: STREET_COLOR, color: '#0a0a0a', fontWeight: 700 },
+  typeBtn: { background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 4, padding: '10px 2px', minWidth: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, color: '#888' },
+  typeBtnActive: { borderColor: STREET_COLOR, color: '#fff', background: 'rgba(255,92,138,0.08)' },
+  typeLetter: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, lineHeight: 1.1, color: STREET_COLOR, textAlign: 'center', overflowWrap: 'anywhere' },
+  typeSub: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", textAlign: 'center' },
+  setupList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 },
+  setupRow: { display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 12px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 4 },
+  setupNum: { width: 24, height: 24, borderRadius: 3, background: STREET_COLOR, color: '#0a0a0a', fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  setupName: { fontSize: 14, color: '#fff', fontWeight: 600 },
+  setupMeta: { fontSize: 11, color: '#888', fontFamily: "'JetBrains Mono', monospace", marginTop: 2 },
+  badge: { display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 8px', borderRadius: 10, background: 'rgba(125,216,125,0.12)', color: '#7dd87d', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" },
+  topLabel: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textTransform: 'uppercase', letterSpacing: 1.5, fontWeight: 700 },
+  exHeader: { textAlign: 'center', padding: '8px 0 0 0' },
+  exName: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 30, color: '#fff', letterSpacing: 1.5, lineHeight: 1.05 },
+  exTarget: { fontSize: 14, color: STREET_COLOR, fontFamily: "'JetBrains Mono', monospace", marginTop: 6, fontWeight: 700 },
+  exCue: { fontSize: 13, color: '#aaa', marginTop: 6, lineHeight: 1.4 },
+  variantBtn: { marginTop: 8, background: 'transparent', border: '1px dashed #333', color: '#888', padding: '4px 10px', fontSize: 11, borderRadius: 12, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace" },
+  setDots: { display: 'flex', gap: 8, justifyContent: 'center' },
+  setDot: { width: 44, height: 44, borderRadius: 22, border: '2px solid #2a2a2a', color: '#555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700 },
+  setDotDone: { background: STREET_COLOR, borderColor: STREET_COLOR, color: '#0a0a0a' },
+  setDotCurrent: { borderColor: STREET_COLOR, color: '#fff' },
+  lastLine: { textAlign: 'center', fontSize: 12, color: '#777', fontFamily: "'JetBrains Mono', monospace" },
+  restBox: { background: '#141414', border: '1px solid #2a2a2a', borderRadius: 6, padding: '8px 12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  restLabel: { fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" },
+  restTime: { fontFamily: "'JetBrains Mono', monospace", fontSize: 44, color: '#fff', fontWeight: 700, lineHeight: 1.1 },
+  restSkip: { background: 'transparent', border: '1px solid #333', color: '#aaa', padding: '12px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: 1 },
+  stepper: { display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 8, alignItems: 'center' },
+  stepBtn: { height: 72, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  stepValue: { textAlign: 'center', fontFamily: "'Bebas Neue', sans-serif", fontSize: 64, color: '#fff', lineHeight: 1 },
+  stepUnit: { fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#666', textTransform: 'uppercase', letterSpacing: 1.5 },
+  smallRow: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 },
+  smallBtn: { padding: '10px 2px', fontSize: 10, letterSpacing: 0.5, minWidth: 0, gap: 2 },
+  sumList: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 18 },
+  sumRow: { padding: '10px 0', borderBottom: '1px solid #1a1a1a' },
+  sumName: { fontSize: 13, color: '#fff', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 },
+  sumTarget: { fontSize: 10, color: '#666', fontFamily: "'JetBrains Mono', monospace" },
+  sumSets: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
+  sumInput: { width: 52, background: '#0a0a0a', border: '1px solid #2a2a2a', color: '#fff', padding: '8px 4px', fontSize: 14, borderRadius: 3, fontFamily: "'JetBrains Mono', monospace", textAlign: 'center', outline: 'none' },
+  weekRow: { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 },
+  weekCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 },
+  weekBars: { display: 'flex', flexDirection: 'column-reverse', gap: 3, width: '100%' },
+  weekBar: { height: 10, borderRadius: 2, width: '100%' },
+  weekLabel: { fontSize: 9, fontFamily: "'JetBrains Mono', monospace" },
+  groupTitle: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, color: STREET_COLOR, letterSpacing: 1.5, marginBottom: 4 },
+  progRow: { display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1a1a1a' },
+  progName: { fontSize: 13, color: '#ddd' },
+  progMeta: { fontSize: 10, color: '#666', fontFamily: "'JetBrains Mono', monospace", marginTop: 2 },
+  progVal: { fontSize: 12, color: '#fff', fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'nowrap' },
+  chipRow: { display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 2 },
+  chip: { flexShrink: 0, background: '#0a0a0a', border: '1px solid #2a2a2a', color: '#888', padding: '6px 10px', fontSize: 11, borderRadius: 14, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'nowrap' },
+  chipActive: { borderColor: STREET_COLOR, color: '#fff', background: 'rgba(255,92,138,0.1)' },
+  empty: { fontSize: 12, color: '#666', margin: 0, lineHeight: 1.6 }
+};
+
 const globalCSS = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Bebas+Neue&family=Inconsolata:wght@400;600&display=swap');
   * { box-sizing: border-box; }
